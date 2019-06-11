@@ -22,7 +22,9 @@ bool buttonDown = 0;
 
 Timer<> timer;
 bool patternActive = 0;
-//bool patternFadeout = 0;
+bool patternFadeout = 0;
+char stage = 0;
+bool stageChange = 0;
 
 void setup() {
   delay(2000); //sanity delay
@@ -52,8 +54,11 @@ void loop()
     {
       buttonDown = 1;
       Serial.println("Pressed\n");
-      patternActive = 1;
-      timer.in(1000, patternFadeout);
+      if(!stage)
+      {
+        stage = 1;
+        stageChange = 1;
+      }
     }
   }
   else
@@ -63,6 +68,36 @@ void loop()
       buttonDown = 0;
       Serial.println("Released\n");
     }
+  }
+
+  if(stageChange)
+  {
+    Serial.print("Stage ");
+    Serial.print(stage);
+    Serial.print('\n');
+    
+    switch(stage)
+    {
+      case 1:
+        patternActive = 1;
+        timer.in(3000, patternFadeoutFcn);
+      break;
+  
+      case 2:
+        patternActive = 0;
+        patternFadeout = 1;
+        timer.in(3000, patternClearFcn);
+      break;
+  
+      case 0:
+        patternActive = 0;
+        patternFadeout = 0;
+      default:
+  
+      break;
+    }
+
+    stageChange = 0;
   }
 
   if(patternActive)
@@ -83,8 +118,14 @@ void loop()
   
     Fire2012WithPalette(); // run simulation frame, using palette colors
   }
+
+  if(patternFadeout)
+  {
+    random16_add_entropy(random());
+    Fire2012WithPaletteFadeout(); // run simulation frame, using palette colors
+  }
   
-  if(patternActive || 1) //while any pattern stage timer is active.
+  if(patternActive || patternFadeout) //while any pattern stage timer is active.
   {
     FastLED.show(); // display this frame
     FastLED.delay(1000 / FRAMES_PER_SECOND);
@@ -94,16 +135,17 @@ void loop()
 
 // Less cooling = taller flames.  More cooling = shorter flames.
 // Default 55, suggested range 20-100 
-#define COOLING  55
+#define COOLING  80
 
-// Higher chance = more roaring fire.  Lower chance = more flickery fire.
+// More sparking = more roaring fire.  Less sparking = more flickery fire.
 // Default 120, suggested range 50-200.
-#define SPARKING 120
+#define SPARKING 75
+
+byte heat[NUM_LEDS];
 
 void Fire2012WithPalette()
 {
 // Array of temperature readings at each simulation cell
-  static byte heat[NUM_LEDS];
 
   // Step 1.  Cool down every cell a little
     for( int i = 0; i < NUM_LEDS; i++) {
@@ -122,7 +164,7 @@ void Fire2012WithPalette()
     }
 
     // Step 4.  Map from heat cells to LED colors
-    for( int j = 0; j < NUM_LEDS; j++) {
+    for( int j = 0; j < NUM_LEDS/2; j++) {
       // Scale the heat value from 0-255 down to 0-240
       // for best results with color palettes.
       byte colorindex = scale8( heat[j], 240);
@@ -133,23 +175,35 @@ void Fire2012WithPalette()
       } else {
         pixelnumber = j;
       }
-      leds[pixelnumber] = color;
+      leds[pixelnumber + NUM_LEDS/2] = color; //start at middle of string.
+      leds[NUM_LEDS/2 - pixelnumber] = color; //reverse and copy.
     }
 }
 
-bool patternFadeout(void *)
-{
-  patternActive = 0;
-  FastLED.clear();
+bool patternFadeoutFcn(void *)
+{ 
+  stage++;
+  stageChange = 1;
+  return false; //no repeat.
+}
 
-/*
+void Fire2012WithPaletteFadeout()
+{
+
+  int cooling = 255;
+  
+    // Step 1.  Cool down every cell a little
+    for( int i = 0; i < NUM_LEDS; i++) {
+      heat[i] = qsub8( heat[i],  random8(0, ((cooling * 10) / NUM_LEDS) + 2));
+    }
+    
   // Step 2.  Heat from each cell drifts 'up' and diffuses a little
   for( int k= NUM_LEDS - 1; k >= 2; k--) {
     heat[k] = (heat[k - 1] + heat[k - 2] + heat[k - 2] ) / 3;
   }
 
   // Step 4.  Map from heat cells to LED colors
-  for( int j = 0; j < NUM_LEDS; j++) {
+  for( int j = 0; j < NUM_LEDS/2; j++) {
     // Scale the heat value from 0-255 down to 0-240
     // for best results with color palettes.
     byte colorindex = scale8( heat[j], 240);
@@ -160,10 +214,26 @@ bool patternFadeout(void *)
     } else {
       pixelnumber = j;
     }
-    leds[pixelnumber] = color;
+    leds[pixelnumber + NUM_LEDS/2] = color; //start at middle of string.
+    leds[NUM_LEDS/2 - pixelnumber] = color; //reverse and copy.
   }
-  */
-    
+
+}
+
+bool patternClearFcn(void *)
+{ 
+  patternFadeout = 0;
+  stage = 0;
+  stageChange = 1;
+
+  FastLED.clear();
   FastLED.show();
+
+  //reset fire values.
+  for( int i = 0; i < NUM_LEDS; i++)
+  {
+      heat[i] = 0;
+  }
+
   return false; //no repeat.
 }
